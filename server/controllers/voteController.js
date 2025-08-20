@@ -1,43 +1,49 @@
+import User from "../models/User.js";
+import Candidate from "../models/Candidate.js";
 import Vote from "../models/Vote.js";
 
-
-// @desc Cast a vote
-// @route POST /api/votes
-
-
+// Vote controller - only for authenticated users
 export const castVote = async (req, res) => {
   try {
-    const { candidate } = req.body;
+    const userId = req.user._id; // from auth middleware
+    const { candidateId } = req.body;
 
-    if (!candidate) {
-      return res.status(400).json({ message: "Candidate is required" });
-    }
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "User not found" });
 
-    const voter = req.user._id;
+    if (user.hasVoted) return res.status(400).json({ message: "You have already voted" });
 
-    // Check if user already voted
-    const alreadyVoted = await Vote.findOne({ voter });
-    if (alreadyVoted) {
-      return res.status(400).json({ message: "You have already voted" });
-    }
+    const candidate = await Candidate.findById(candidateId);
+    if (!candidate) return res.status(404).json({ message: "Candidate not found" });
 
-    const vote = await Vote.create({ voter, candidate });
-    res.status(201).json({ message: "Vote cast successfully", vote });
+    // Save vote
+    const vote = new Vote({ voter: userId, candidate: candidateId });
+    await vote.save();
+
+    // Increment candidate votes
+    candidate.votes += 1;
+    await candidate.save();
+
+    // Mark user as voted
+    user.hasVoted = true;
+    await user.save();
+
+    res.status(200).json({ message: "Vote cast successfully" });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-
-// @desc Get all votes
-// @route GET /api/votes
-export const getVotes = async (req, res) => {
+// Get results - accessible by anyone
+export const getResults = async (req, res) => {
   try {
-    const votes = await Vote.find().populate("candidateId", "name party");
-    res.json(votes);
+    const candidates = await Candidate.find()
+      .select("name party votes -_id")
+      .sort({ votes: -1 });
+    res.status(200).json({ candidates });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
   }
 };
-
-
